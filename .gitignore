@@ -40,3 +40,6 @@ Data/
 Thumbs.db
 .vscode/
 .idea/
+
+# old folder
+context-a-if

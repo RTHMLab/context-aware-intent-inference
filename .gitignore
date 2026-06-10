@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+
+# Large/raw/intermediate data
+data/raw/
+data/external/
+data/intermediate/
+Data/
+*.bin
+*.mvnx
+*.mvn
+*.xlsx
+*.npz
+*.pkl
+*.keras
+*.h5
+*.pt
+*.pth
+
+# Images/videos/results
+*.png
+*.jpg
+*.jpeg
+*.mp4
+*.avi
+*.mov
+
+# Logs/cache
+*.log
+.cache/
+.ipynb_checkpoints/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

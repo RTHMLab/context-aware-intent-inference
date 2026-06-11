@@ -1,15 +1,23 @@
 import pandas as pd
+import argparse
+
+parser = argparse.ArgumentParser(description="Extract per-trial object depths from YOLO/depth detections.")
+parser.add_argument("--trials_csv", required=True, help="Trial CSV generated from ANVIL annotations")
+parser.add_argument("--detections_csv", required=True, help="YOLO/depth detection CSV from processRawData.py")
+parser.add_argument("--output_csv", required=True, help="Output object positions/depths CSV")
+parser.add_argument("--skip_first_n_trials", type=int, default=0, help="Optional number of initial trials to skip")
+args = parser.parse_args()
 
 # Load trials CSV
-testing_trials_df = pd.read_csv("sub3-trials.csv")
+testing_trials_df = pd.read_csv(args.trials_csv)
 
-# Ignore first 15 trials (rows)
-testing_trials_df = testing_trials_df.iloc[15:].reset_index(drop=True)
-# .reset_index(drop=True) is important to reset the DataFrame index after slicing,
-# otherwise, row.iterrows() might behave unexpectedly with a fragmented index.
+if args.skip_first_n_trials > 0:
+    testing_trials_df = testing_trials_df.iloc[args.skip_first_n_trials:].reset_index(drop=True)
+else:
+    testing_trials_df = testing_trials_df.reset_index(drop=True)
 
-# Load object detection data (output from previous script with clustered depth)
-object_data_df = pd.read_csv("yolov8nFT-conf6-output.csv")
+# Load object detection data
+object_data_df = pd.read_csv(args.detections_csv)
 
 # Define column names from object_data_df
 TIME_COL = "Time (in ms)"
@@ -66,13 +74,14 @@ for trial_idx, row in testing_trials_df.iterrows():
 
         # Append processed row
         # trial_idx+1 is now based on the filtered DataFrame's new index (0, 1, 2, ... for the remaining trials)
-        processed_data.append([timestamp, trial_idx+1+15, gesture] + [object_depths[obj] for obj in OBJECTS_TO_KEEP])
+        trial_number = row["Trial Number"] if "Trial Number" in testing_trials_df.columns else trial_idx + 1
+        processed_data.append([timestamp, trial_number, gesture] + [object_depths[obj] for obj in OBJECTS_TO_KEEP])
 
 # Convert processed data to DataFrame
 output_df = pd.DataFrame(processed_data, columns=["Time (in ms)", "Trial Number", "Gesture"] + OBJECTS_TO_KEEP)
 
 # Save to CSV
-output_filename = "object_positions_by_trial-sub3.csv"
+output_filename = args.output_csv
 output_df.to_csv(output_filename, index=False)
 
 print(f"✅ Object positions saved in {output_filename}")

@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 import math
+import argparse
 
 # --- Define Constants and Column Names (VERIFY THESE CAREFULLY AGAINST YOUR ACTUAL CSVs) ---
 TRIALS_GESTURE_COL = "Gesture"
@@ -20,15 +21,27 @@ HUMAN_POS_COLS = ["Pelvis x", "Pelvis y", "Pelvis z"]
 ORI_TIME_COL = "Time (in ms)"
 HUMAN_ORI_COLS = ["Pelvis x", "Pelvis y", "Pelvis z"] # Assuming Pelvis z is Yaw/Heading
 
+# --- Command-line arguments ---
+parser = argparse.ArgumentParser(description="Map detected object depths to human-object distances using Xsens pelvis pose.")
+parser.add_argument("--trials_csv", required=True, help="Trial CSV generated from ANVIL annotations")
+parser.add_argument("--object_positions_csv", required=True, help="Per-trial object depth CSV from extractObjectPositions.py")
+parser.add_argument("--segment_position_csv", required=True, help="Xsens pelvis segment position CSV")
+parser.add_argument("--segment_orientation_csv", required=True, help="Xsens pelvis segment orientation Euler CSV")
+parser.add_argument("--output_csv", required=True, help="Output mapped distances CSV")
+parser.add_argument("--output_plot_dir", default=None, help="Optional output directory for distance plots")
+parser.add_argument("--validation_output_csv", default=None, help="Optional validation CSV path")
+parser.add_argument("--skip_first_n_trials", type=int, default=0, help="Optional number of initial trials to skip")
+args = parser.parse_args()
+
 # --- Load Data ---
 try:
-    trials_df = pd.read_csv("sub3-trials.csv")
-    object_data = pd.read_csv("object_positions_by_trial-sub3.csv")
-    human_pose_data = pd.read_csv("R-sub3-03-09_Segment Position.csv")
-    orientation_data = pd.read_csv("R-sub3-03-09_Segment Orientation - Euler.csv")
+    trials_df = pd.read_csv(args.trials_csv)
+    object_data = pd.read_csv(args.object_positions_csv)
+    human_pose_data = pd.read_csv(args.segment_position_csv)
+    orientation_data = pd.read_csv(args.segment_orientation_csv)
 except FileNotFoundError as e:
     print(f"Error loading data file: {e}. Please ensure all CSV files are in the correct directory.")
-    exit() # Stop execution if a file is missing
+    exit()
 except KeyError as e:
     print(f"Error: Missing expected column in trials.csv: {e}. Please check GROUND_TRUTH_OBJECT_COL.")
     exit()
@@ -39,12 +52,18 @@ except KeyError as e:
 # or simply access it before slicing. Let's make a copy.
 original_trials_df_for_gt = trials_df.copy() # Keep a copy of original trials_df before slicing
 
-trials_df = trials_df.iloc[15:].reset_index(drop=True)
+if args.skip_first_n_trials > 0:
+    trials_df = trials_df.iloc[args.skip_first_n_trials:].reset_index(drop=True)
+else:
+    trials_df = trials_df.reset_index(drop=True)
 
 
 # Ensure output folder exists
-os.makedirs("distance_plots-sub3", exist_ok=True)
-os.makedirs("validation_results", exist_ok=True) # NEW: Folder for validation output
+if args.output_plot_dir:
+    os.makedirs(args.output_plot_dir, exist_ok=True)
+
+if args.validation_output_csv:
+    os.makedirs(os.path.dirname(args.validation_output_csv), exist_ok=True)
 
 # Constants
 DEPTH_POSITION_JUMP_THRESHOLD = 0.2  # Max allowed absolute position change (meters) for an object
@@ -61,11 +80,11 @@ def compute_absolute_position(human_x, human_y, depth, orientation_deg):
 
 # Process each trial separately
 for trial_idx_in_filtered_df, trial in trials_df.iterrows():
-    trial_num_orig = trial_idx_in_filtered_df + 16 # Adjust to reflect original trial number (16 onwards)
+    trial_num_orig = int(trial["Trial Number"]) if "Trial Number" in trials_df.columns else trial_idx_in_filtered_df + 1
     
     trial_gesture = trial[TRIALS_GESTURE_COL]
     # NEW: Get the ground truth object for this specific trial
-    ground_truth_object = original_trials_df_for_gt.loc[trial_num_orig - 1, GROUND_TRUTH_OBJECT_COL] # -1 because trials_df is 0-indexed and we skipped 15 rows.
+    ground_truth_object = trial[GROUND_TRUTH_OBJECT_COL]
     
     trial_start_time = trial[TRIALS_START_TIME_COL]
     trial_end_time = trial[TRIALS_END_TIME_COL]
@@ -183,10 +202,11 @@ for trial_idx_in_filtered_df, trial in trials_df.iterrows():
     plt.grid(True)
     plt.tight_layout()
     
-    plot_filename = f"distance_plots-sub3/trial_{trial_num_orig}_{trial_gesture}_distance.png"
-    plt.savefig(plot_filename, dpi=300)
+    if args.output_plot_dir:
+        plot_filename = os.path.join(args.output_plot_dir, f"trial_{trial_num_orig}_{trial_gesture}_distance.png")
+        plt.savefig(plot_filename, dpi=300)
+        print(f"✅ Saved plot for Trial {trial_num_orig}, Gesture: {trial_gesture}")
     plt.close()
-    print(f"✅ Saved plot for Trial {trial_num_orig}, Gesture: {trial_gesture}")
 
 # Save final aggregated CSV file
 columns = [
@@ -198,7 +218,7 @@ columns = [
 ]
 
 df_final = pd.DataFrame(all_trial_data, columns=columns)
-output_csv_filename = "mapped_distances_by_trial.csv"
+output_csv_filename = args.output_csv
 df_final.to_csv(output_csv_filename, index=False)
 print(f"\n✅ All distances computed, CSV saved successfully as {output_csv_filename}!")
 
@@ -297,6 +317,6 @@ for idx, trial in original_trials_df_for_gt.iterrows():
 
 # Save validation results to CSV
 validation_df = pd.DataFrame(validation_results)
-validation_output_filename = "validation_nearest_object_at_3000ms.csv"
-validation_df.to_csv(os.path.join("validation_results", validation_output_filename), index=False)
-print(f"\n✅ Validation results saved to {os.path.join('validation_results', validation_output_filename)}")
+if args.validation_output_csv:
+    validation_df.to_csv(args.validation_output_csv, index=False)
+    print(f"\n✅ Validation results saved to {args.validation_output_csv}")

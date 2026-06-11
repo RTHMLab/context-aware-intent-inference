@@ -1,126 +1,211 @@
 import os
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Suppress TensorFlow warnings before import
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
-import sys
+import argparse
 from pathlib import Path
-sys.path.append(str(Path(__file__).resolve().parent.parent))  # Add project root to Python path
 
-import pandas as pd
-import numpy as np
 import joblib
-import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 from tensorflow.keras.models import load_model
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 
-from scripts.data_loader import extract_features, parse_anvil, load_offsets
+from src.gr.data_loader import (
+    TIME_COL,
+    TRIAL_NUMBER_COL,
+    resolve_case_insensitive_file,
+    extract_features,
+)
 
-'''
-# --- Configuration ---
-SESSION_ID = "sub3"
-MODES = ["original", "mirrored"]
-RESULTS_DIR = Path("results") / SESSION_ID
-DATA_DIR = Path("Data")
-ANNOTATIONS_DIR = Path("annotations") / "Averaged_Annotations"  # ✅ Updated subdirectory
-MODEL_PATH = Path("trained_models") / "transformer_model.keras"  # ✅ Updated to .keras
-ENCODER_PATH = Path("trained_models") / "label_encoder.pkl"
-NORMALIZATION_PATH = Path("trained_models") / "normalization_stats.npz"
-GROUNDTRUTH_PATH = Path("GroundTruth-Annotations-Offset.csv")
-WINDOW_SIZE = 500'''
 
-# --- Configuration ---
-SESSION_ID = "sub3"
-MODES = ["original"]
-RESULTS_DIR = Path("results") / SESSION_ID
-DATA_DIR = Path("Data")
-ANNOTATIONS_DIR = Path("annotations") / "Averaged_Annotations"  # ✅ Updated subdirectory
-MODEL_PATH = Path("trained_models") / "transformer_model_ablation.keras"  # ✅ Updated to .keras
-ENCODER_PATH = Path("trained_models") / "label_encoder_ablation.pkl"
-NORMALIZATION_PATH = Path("trained_models") / "normalization_stats_ablation.npz"
-GROUNDTRUTH_PATH = Path("GroundTruth-Annotations-Offset.csv")
-WINDOW_SIZE = 500
+WINDOW_MS = 500
 
-# --- Load Trained Model & Tools ---
-print("Loading model and utilities...")
-model = load_model(MODEL_PATH)
-label_encoder = joblib.load(ENCODER_PATH)
-norm_stats = np.load(NORMALIZATION_PATH)
-mean, std = norm_stats['mean'], norm_stats['std']
 
-# --- Load Annotations & Offset ---
-print("Loading annotations...")
-csv_path = DATA_DIR / ("mirrored_JointAngles" if MODES[0] == "mirrored" else "extracted_JointAngles") / f"{SESSION_ID}_ja{'_m' if MODES[0] == 'mirrored' else ''}.csv"
-motion_data = pd.read_csv(csv_path)
-time_col = 'Time (in ms)'
-min_time = motion_data[time_col].min()
-
-anvil_path = ANNOTATIONS_DIR / f"{SESSION_ID}_averaged.anvil"
-offsets = load_offsets(GROUNDTRUTH_PATH)
-offset = offsets[SESSION_ID]
-annotations = parse_anvil(anvil_path, min_time, offset)
-
-# --- Helper for normalization ---
 def normalize_sequence(seq, mean, std):
     return (seq - mean) / (std + 1e-8)
 
-# --- Process Each Mode (original & mirrored) ---
-for mode in MODES:
-    print(f"\nProcessing {mode} data...")
-    results_path = RESULTS_DIR / mode
-    results_path.mkdir(parents=True, exist_ok=True)
 
-    csv_path = DATA_DIR / ("mirrored_JointAngles" if mode == "mirrored" else "extracted_JointAngles") / f"{SESSION_ID}_ja{'_m' if mode == 'mirrored' else ''}.csv"
-    motion_data = pd.read_csv(csv_path)
-    min_time = motion_data[time_col].min()
+def run_trial_inference(
+    model,
+    label_encoder,
+    mean,
+    std,
+    motion_df,
+    trial_row,
+    max_len,
+    window_ms=WINDOW_MS,
+):
+    trial_start = float(trial_row["Start Time (Xsens)"])
+    action_start = float(trial_row["Action Start Time (Xsens)"])
 
-    # Sliding window inference per annotation
-    for i, (start, _, gesture) in enumerate(annotations):
-        pred_list = []
-        start_time = start - 3000 - 499
-        end_time = start
+    # First prediction at t=0 uses window [-500, 0] relative to trial start.
+    first_window_start = trial_start - window_ms
 
-        time_zero = start_time + WINDOW_SIZE  # This corresponds to the first inference window ending at (start - 3000)
+    # Last prediction at t=2500 uses window [2000, 2500] relative to trial start.
+    last_window_start = action_start - window_ms
 
-        for t in motion_data[time_col]:
-            if t < start_time:
+    candidate_starts = motion_df[
+        (motion_df[TIME_COL] >= first_window_start)
+        & (motion_df[TIME_COL] <= last_window_start)
+    ][TIME_COL].to_numpy()
+
+    rows = []
+
+    for window_start in candidate_starts:
+        window_end = window_start + window_ms
+
+        segment = motion_df[
+            (motion_df[TIME_COL] >= window_start)
+            & (motion_df[TIME_COL] < window_end)
+        ]
+
+        if segment.empty:
+            continue
+
+        features = extract_features(segment)
+        normalized = normalize_sequence(features, mean, std)
+        padded = pad_sequences(
+            [normalized],
+            maxlen=max_len,
+            dtype="float32",
+            padding="post",
+            value=0.0,
+        )
+
+        preds = model.predict(padded, verbose=0)[0]
+
+        row = {
+            "time_ms": window_end - trial_start,
+        }
+
+        for cls, conf in zip(label_encoder.classes_, preds):
+            row[f"{cls}_confidence"] = float(conf)
+
+        confidence_cols = [f"{cls}_confidence" for cls in label_encoder.classes_]
+        predicted_col = max(confidence_cols, key=lambda c: row[c])
+        row["predicted_gesture"] = predicted_col.replace("_confidence", "")
+        row["predicted_confidence"] = row[predicted_col]
+
+        rows.append(row)
+
+    return pd.DataFrame(rows)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Run continuous GR inference on target-subject test trials.")
+    parser.add_argument("--target_subject", required=True)
+    parser.add_argument("--model_dir", default=None)
+    parser.add_argument("--base_model_dir", default=None)
+    parser.add_argument("--split_csv", default=None)
+    parser.add_argument("--joint_angles_root", default="data/extracted_JointAngles")
+    parser.add_argument("--trials_root", default="data/trials")
+    parser.add_argument("--output_dir", default=None)
+    args = parser.parse_args()
+
+    target_subject = args.target_subject.lower()
+
+    model_dir = Path(args.model_dir or f"results/gr/finetuned_{target_subject}")
+    base_model_dir = Path(args.base_model_dir or f"results/gr/base_{target_subject}")
+    split_csv = Path(args.split_csv or f"results/gr/splits/{target_subject}_trial_split.csv")
+    output_dir = Path(args.output_dir or f"results/gr/inference_{target_subject}")
+    joint_angles_root = Path(args.joint_angles_root)
+    trials_root = Path(args.trials_root)
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    per_trial_dir = output_dir / "per_trial"
+    per_trial_dir.mkdir(parents=True, exist_ok=True)
+
+    model_path = model_dir / f"transformer_gr_finetuned_{target_subject}.keras"
+    norm_path = base_model_dir / "normalization_stats.npz"
+    encoder_path = base_model_dir / "label_encoder.pkl"
+
+    if not model_path.exists():
+        raise FileNotFoundError(f"Missing fine-tuned model: {model_path}")
+    if not norm_path.exists():
+        raise FileNotFoundError(f"Missing normalization stats: {norm_path}")
+    if not encoder_path.exists():
+        raise FileNotFoundError(f"Missing label encoder: {encoder_path}")
+    if not split_csv.exists():
+        raise FileNotFoundError(f"Missing split CSV: {split_csv}")
+
+    print(f"Loading model from {model_path}")
+    model = load_model(model_path)
+
+    label_encoder = joblib.load(encoder_path)
+    norm_stats = np.load(norm_path)
+    mean = norm_stats["mean"]
+    std = norm_stats["std"]
+    max_len = model.input_shape[1]
+
+    split_df = pd.read_csv(split_csv)
+    test_df = split_df[split_df["Split"] == "test"].copy()
+
+    all_rows = []
+
+    for session_id, session_split_df in test_df.groupby("Session", sort=False):
+        ja_csv = resolve_case_insensitive_file(joint_angles_root, f"{session_id}_ja.csv")
+        trials_csv = resolve_case_insensitive_file(trials_root, f"{session_id}_trials.csv")
+
+        motion_df = pd.read_csv(ja_csv).sort_values(TIME_COL).reset_index(drop=True)
+        trials_df = pd.read_csv(trials_csv)
+
+        for _, split_row in session_split_df.iterrows():
+            session_trial = int(split_row["Session Trial"])
+            global_trial = int(split_row["Global Trial"])
+            gesture = str(split_row["Gesture"])
+
+            trial_match = trials_df[trials_df[TRIAL_NUMBER_COL] == session_trial]
+            if trial_match.empty:
+                raise RuntimeError(
+                    f"Could not find trial {session_trial} in {trials_csv}"
+                )
+
+            trial_row = trial_match.iloc[0]
+
+            pred_df = run_trial_inference(
+                model=model,
+                label_encoder=label_encoder,
+                mean=mean,
+                std=std,
+                motion_df=motion_df,
+                trial_row=trial_row,
+                max_len=max_len,
+            )
+
+            if pred_df.empty:
+                print(f"No predictions for {session_id} trial {session_trial}")
                 continue
-            if t > end_time:
-                break
 
-            window_start = t
-            window_end = t + WINDOW_SIZE
-            if window_start < min_time:
-                continue
-            segment = motion_data[(motion_data[time_col] >= window_start) & (motion_data[time_col] < window_end)]
-            if segment.empty:
-                continue
+            pred_df.insert(0, "Subject", target_subject)
+            pred_df.insert(1, "Session", session_id)
+            pred_df.insert(2, "Global Trial", global_trial)
+            pred_df.insert(3, "Session Trial", session_trial)
+            pred_df.insert(4, "Gesture", gesture)
+            pred_df.insert(5, "Split", "test")
 
-            features = extract_features(segment)
-            normalized = normalize_sequence(features, mean, std)
-            padded = pad_sequences([normalized], maxlen=121, padding='post', dtype='float32')
+            safe_gesture = gesture.replace("/", "-")
+            trial_csv = per_trial_dir / f"{global_trial:04d}_{session_id}_trial{session_trial}_{safe_gesture}.csv"
+            pred_df.to_csv(trial_csv, index=False)
 
-            preds = model.predict(padded, verbose=0)[0]
-            pred_row = {f"{cls}_confidence": preds[j] for j, cls in enumerate(label_encoder.classes_)}
-            pred_row['time'] = window_end - time_zero  # ✅ 0-based time axis starting at (start - 3000)
-            pred_list.append(pred_row)
+            all_rows.append(pred_df)
 
-        df = pd.DataFrame(pred_list)
-        output_file = results_path / f"{str(i+1).zfill(3)}_{gesture}.csv"
-        df.to_csv(output_file, index=False)
-        print(f"✅ Saved: {output_file}")
+            print(
+                f"Saved trial predictions: {trial_csv} "
+                f"rows={len(pred_df)} time={pred_df['time_ms'].min():.1f}-{pred_df['time_ms'].max():.1f} ms"
+            )
 
-        # Plot
-        plt.figure(figsize=(12, 6))
-        for cls in label_encoder.classes_:
-            plt.plot(df['time'], df[f"{cls}_confidence"], label=cls)
-        plt.xlabel("Time (ms, relative to inference window start)")
-        plt.ylabel("Confidence")
-        plt.title(f"Gesture Confidence - {gesture} ({mode})")
-        plt.legend()
-        plt.grid(True)
-        plt.tight_layout()
-        plot_path = output_file.with_suffix(".png")
-        plt.savefig(plot_path)
-        plt.close()
-        print(f"✅ Plot saved: {plot_path}")
+    if not all_rows:
+        raise RuntimeError("No inference predictions were generated.")
 
-print("\n🎉 Inference complete for all annotations.")
+    all_df = pd.concat(all_rows, ignore_index=True)
+
+    combined_csv = output_dir / "gr_predictions_all_test_trials.csv"
+    all_df.to_csv(combined_csv, index=False)
+
+    print(f"Saved combined GR predictions to {combined_csv}")
+    print(f"Total prediction rows: {len(all_df)}")
+    print(f"Total test trials: {all_df[['Session', 'Session Trial']].drop_duplicates().shape[0]}")
+
+
+if __name__ == "__main__":
+    main()

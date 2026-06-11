@@ -4,9 +4,6 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 import argparse
 from pathlib import Path
 
-import os
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
-
 import tensorflow as tf
 from tensorflow.keras.callbacks import EarlyStopping
 from tensorflow.keras.optimizers import Adam
@@ -40,12 +37,27 @@ def main():
         print("No GPU detected. Training will use CPU.")
 
     print("Loading GR training windows...")
-    (x_train_raw, y_train_raw), (x_test_raw, y_test_raw) = load_all_data(
-        test_session=args.test_session,
-        joint_angles_root=args.joint_angles_root,
-        trials_root=args.trials_root,
-        merge_sit=not args.no_merge_sit,
-    )
+
+    if args.test_session:
+        split_name = args.test_session
+        print(f"Using session-level debug split: held-out session = {args.test_session}")
+
+        (x_train_raw, y_train_raw), (x_test_raw, y_test_raw) = load_all_data(
+            test_session=args.test_session,
+            joint_angles_root=args.joint_angles_root,
+            trials_root=args.trials_root,
+            merge_sit=not args.no_merge_sit,
+        )
+    else:
+        split_name = args.target_subject.lower()
+        print(f"Using subject-level split: held-out subject = {split_name}")
+
+        (x_train_raw, y_train_raw), (x_test_raw, y_test_raw) = load_all_data_by_subject(
+            target_subject=split_name,
+            joint_angles_root=args.joint_angles_root,
+            trials_root=args.trials_root,
+            merge_sit=not args.no_merge_sit,
+        )
 
     print(f"Train segments: {len(x_train_raw)}")
     print(f"Test segments: {len(x_test_raw)}")
@@ -71,6 +83,7 @@ def main():
         input_shape=(max_len, num_features),
         num_classes=len(label_encoder.classes_),
     )
+
     model.compile(
         optimizer=Adam(learning_rate=args.learning_rate),
         loss="sparse_categorical_crossentropy",
@@ -94,13 +107,14 @@ def main():
         verbose=1,
     )
 
-    print("Evaluating on held-out test session...")
+    print("Evaluating on held-out data...")
     loss, accuracy = model.evaluate(x_test, y_test, verbose=1)
     print(f"Test loss: {loss:.4f}")
     print(f"Test accuracy: {accuracy:.4f}")
 
-    model_path = output_dir / f"transformer_gr_leaveout_{args.test_session}.keras"
+    model_path = output_dir / f"transformer_gr_leaveout_{split_name}.keras"
     model.save(model_path)
+
     print(f"Saved model to {model_path}")
 
 

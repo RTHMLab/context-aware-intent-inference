@@ -11,14 +11,15 @@ import tensorflow as tf
 from tensorflow.keras.callbacks import EarlyStopping
 from tensorflow.keras.optimizers import Adam
 
-from src.gr.data_loader import load_all_data
+from src.gr.data_loader import load_all_data, load_all_data_by_subject
 from src.gr.model import build_transformer_model
 from src.gr.preprocessing import preprocess_data
 
 
 def main():
     parser = argparse.ArgumentParser(description="Train gesture recognition model from Xsens trial windows.")
-    parser.add_argument("--test_session", default="sub3")
+    parser.add_argument("--test_session", default=None, help="Optional held-out session for debugging")
+    parser.add_argument("--target_subject", default="sub3", help="Held-out subject for subject-level base training")
     parser.add_argument("--joint_angles_root", default="data/extracted_JointAngles")
     parser.add_argument("--trials_root", default="data/trials")
     parser.add_argument("--output_dir", default="results/gr/models")

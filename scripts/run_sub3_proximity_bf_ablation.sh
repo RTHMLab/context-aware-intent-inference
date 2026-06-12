@@ -16,6 +16,7 @@ BF_ABL_ROOT="results/bayesian_fusion_ablation"
 EVAL_ABL_ROOT="results/evaluation_ablation"
 LOG_DIR="logs"
 LOG_FILE="${LOG_DIR}/sub3_proximity_bf_ablation.log"
+REPORT_DIR="docs/experiment_reports/sub3_proximity_bf_ablation"
 
 mkdir -p "$LOG_DIR"
 
@@ -281,6 +282,59 @@ coverage_summary.to_csv("results/evaluation_ablation/sub3_ablation_coverage_summ
 metrics_summary.to_csv("results/evaluation_ablation/sub3_ablation_metric_summary.csv", index=False)
 PY
 
+
+echo
+echo "============================================================"
+echo "Publishing lightweight ablation report to GitHub"
+echo "============================================================"
+
+mkdir -p "$REPORT_DIR"
+
+cp results/evaluation_ablation/sub3_ablation_coverage_summary.csv \
+   "$REPORT_DIR/sub3_ablation_coverage_summary.csv"
+
+cp results/evaluation_ablation/sub3_ablation_metric_summary.csv \
+   "$REPORT_DIR/sub3_ablation_metric_summary.csv"
+
+# Keep the last part of the log in git so it is readable on GitHub.
+# The full log stays local under logs/.
+tail -n 400 "$LOG_FILE" > "$REPORT_DIR/sub3_ablation_log_tail.txt"
+
+cat > "$REPORT_DIR/README.md" <<EOF
+# Sub3 proximity + Bayesian Fusion ablation
+
+Generated automatically by:
+
+\`\`\`bash
+scripts/run_sub3_proximity_bf_ablation.sh
+\`\`\`
+
+This report compares sub3 proximity coverage and Bayesian Fusion evaluation for YOLO model/confidence variants.
+
+Tracked files:
+
+- \`sub3_ablation_coverage_summary.csv\`
+- \`sub3_ablation_metric_summary.csv\`
+- \`sub3_ablation_log_tail.txt\`
+
+Full generated outputs are intentionally ignored and remain local under:
+
+- \`results/proximity_ablation/\`
+- \`results/bayesian_fusion_ablation/\`
+- \`results/evaluation_ablation/\`
+- \`logs/sub3_proximity_bf_ablation.log\`
+EOF
+
+git add "$REPORT_DIR"
+
+if git diff --cached --quiet; then
+    echo "No report changes to commit."
+else
+    git commit -m "Add sub3 proximity BF ablation report"
+    git push
+fi
+
 echo
 echo "Finished: $(date)"
 echo "Log file: $LOG_FILE"
+echo "GitHub report dir: $REPORT_DIR"

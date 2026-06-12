@@ -59,3 +59,6 @@ logs/
 
 # Generated GR outputs
 results/gr/
+
+# Generated evaluation outputs
+results/evaluation/

@@ -1,37 +1,40 @@
 # Context-Aware Intent Inference
 
-This repository contains the cleaned code pipeline for context-aware human intent inference using wearable motion sensing and first-person RGB-D visual context.
+This repository contains the code pipeline for context-aware human intent inference using wearable motion sensing and first-person RGB-D visual context.
 
-The project supports four main components:
+This codebase supports the experiments reported in:
+
+**Bayesian Belief Fusion for Intent Inference via Egocentric Vision and Gesture Recognition**
+
+## Overview
+
+The pipeline contains four main components:
 
 1. **Gesture Recognition (GR)**  
    Predicts intent from Xsens joint-angle motion windows.
 
 2. **2D Mapping / Proximity Extraction**  
-   Uses synchronized RGB-D frames, YOLO object detections, depth values, and Xsens segment pose data to estimate human-object proximity over time.
+   Uses synchronized RGB-D frames, object detections, depth values, and Xsens segment pose data to estimate human-object proximity over time.
 
 3. **Bayesian Fusion (BF)**  
-   Combines GR confidence scores with object proximity using manually defined Bayesian conditional probability tables.
+   Combines GR confidence scores with object-proximity evidence using manually defined Bayesian likelihoods.
 
 4. **End-to-End Transformer (E2E)**  
-   Uses RGB-D frames and Xsens motion data directly in a multimodal Transformer-based model.
+   Uses RGB-D frames and Xsens motion data directly in a multimodal deep learning model.
 
-## Repository Status
+## Data Access
 
-This repository has been reconstructed around the Ro-Man accepted context-aware intent inference pipeline.
+The raw RGB-D and motion-capture data are not included in this repository due to file size and participant privacy.
 
-Current cleaned components include:
+To request access to the data, please contact:
 
-- GR LOSO training/inference pipeline
-- YOLO-depth proximity extraction pipeline
-- Final Bayesian Fusion pipeline
-- E2E Transformer LOSO pipeline
-- General dynamic evaluation script
-- Final method-comparison report scripts
+    ptimilsina@famu.fsu.edu
 
-Large raw data, generated model outputs, and generated prediction outputs are kept locally and are not pushed to GitHub.
+After receiving the data, place it under the local `data/` directory as described below.
 
-## Local Data Layout
+The `data/` folder is expected to exist locally, but its contents are ignored by Git and are not pushed to GitHub.
+
+## Expected Local Data Layout
 
 Expected local structure:
 
@@ -55,156 +58,62 @@ Expected local structure:
     └── models/
         └── yolov8lFT.pt
 
-The repository assumes RGB-D PNGs are already synchronized. Raw RealSense `.bin` files, camera alignment code, and raw camera timestamp correction are outside the scope of this repository.
+## Install
 
-## Trial Window Convention
+Create and activate a Python environment, then install dependencies:
 
-Each annotated action trial is represented as:
+    pip install -r requirements.txt
 
-    2.5 seconds before gesture onset
-    1.0 second after gesture onset
+## Run Pipeline
 
-Dynamic labels are assigned as:
+Run all commands from the repository root.
 
-    before onset threshold: Nothing
-    after onset threshold: action label
+Run the components in the following order.
 
-The current cleaned split-sit label space contains 9 classes:
-
-    Clean-table
-    Nothing
-    Pick-up-backpack
-    Push-chair
-    Sit-on-chair
-    Sit-on-couch
-    Sit-on-table
-    Stand-on-couch
-    Wear-backpack
-
-## Main Pipeline Scripts
-
-### Gesture Recognition
-
-Create subject splits:
-
-    python scripts/create_gr_subject_splits.py
-
-Run the full GR pipeline:
+### 1. Gesture Recognition
 
     scripts/run_gr_full_pipeline_all_subjects.sh
 
-Main GR source files:
+This runs the GR leave-one-subject-out training, fine-tuning, and inference pipeline.
 
-    src/gr/data_loader.py
-    src/gr/preprocessing.py
-    src/gr/model.py
-    src/gr/train.py
-    src/gr/fine_tune.py
-    src/gr/inference.py
+### 2. 2D Mapping / Proximity Extraction
 
-### 2D Mapping / Proximity Extraction
+    scripts/run_2d_mapping_full_pipeline_all_sessions.sh
 
-Run YOLO-depth extraction:
+This runs object-depth extraction and proximity mapping for all sessions.
 
-    scripts/run_yolo_depth_all_sessions.sh
-
-Run proximity mapping after YOLO detections:
-
-    scripts/run_proximity_after_yolo_all_sessions.sh
-
-Run the final YOLOv8lFT + Bayesian Fusion pipeline:
+### 3. Bayesian Fusion
 
     scripts/run_final_yolov8lFT_bf_pipeline.sh
 
-Main proximity source files:
+This combines GR outputs with proximity evidence to generate Bayesian Fusion predictions.
 
-    src/proximity_mapping/processRawData.py
-    src/proximity_mapping/extractObjectPositions.py
-    src/proximity_mapping/mapper.py
-    src/proximity_mapping/normalizeTime.py
-
-### Bayesian Fusion
-
-Main BF source file:
-
-    src/bayesian_fusion/run_bayesian_fusion.py
-
-Bayesian Fusion combines GR confidence scores with object-proximity evidence using interpretable expert-defined likelihoods.
-
-### End-to-End Transformer
-
-Run the E2E Transformer LOSO pipeline:
+### 4. End-to-End Transformer
 
     scripts/run_e2e_transformer_full_pipeline_all_subjects.sh
 
-Match E2E outputs to the GR/BF test-trial set:
+This runs the E2E leave-one-subject-out training, fine-tuning, and inference pipeline.
 
-    scripts/evaluate_e2e_matched_to_gr.sh
+### 5. Final Evaluation
 
-Main E2E source files:
+    scripts/run_final_evaluation.sh
 
-    src/e2e_transformer/dataset_module.py
-    src/e2e_transformer/model.py
-    src/e2e_transformer/train.py
-    src/e2e_transformer/fineTune.py
-    src/e2e_transformer/predict_and_compare.py
-
-## Evaluation
-
-General dynamic evaluation script:
-
-    python -m src.evaluation.evaluate_predictions \
-      --input_glob "results/<method>/inference_*/<prediction_file>.csv" \
-      --method_name <method_name> \
-      --output_dir results/evaluation \
-      --label_mode dynamic \
-      --onset_time_ms 2000 \
-      --max_time_ms 2500
-
-Final comparison report:
-
-    scripts/create_final_method_comparison_report.py
-
-This generates:
+This generates the final method-comparison outputs under:
 
     docs/experiment_reports/final_method_comparison/
 
-The report includes:
+### 6. Final Figures
 
-    final_overall_metrics.csv
-    final_subject_metrics.csv
-    final_per_class_f1.csv
-    final_early_prediction_lead_time.csv
-    final_early_prediction_summary.csv
-    final_ambiguity_metrics.csv
-    final_conditional_bf_threshold_sweep.csv
+    scripts/run_final_plots.sh
 
-## Experiment Reports
+### 7. Final Statistical Tests
 
-Tracked report folders include:
+    scripts/run_final_stats.sh
 
-    docs/experiment_reports/final_yolov8lFT_conf06_pipeline/
-    docs/experiment_reports/e2e_transformer_loso_pipeline/
-    docs/experiment_reports/final_method_comparison/
-    docs/experiment_reports/sub3_original_scope_audit/
+## Outputs
 
-The `sub3_original_scope_audit` report isolates the current cleaned outputs to subject sub3 to compare with the narrower original accepted-paper evaluation scope.
+Generated prediction outputs are written locally under `results/` and are ignored by Git.
 
-## Generated Outputs
+Selected compact report files and final figures are tracked under:
 
-Generated outputs are local and ignored by Git, including:
-
-    results/gr/
-    results/proximity/
-    results/bayesian_fusion/
-    results/e2e_transformer/
-    results/e2e_transformer_matched_gr/
-    results/evaluation/
-
-Only selected compact report CSVs and READMEs under `docs/experiment_reports/` are tracked.
-
-## Notes
-
-This repository is intended to preserve the accepted Ro-Man pipeline while also supporting cleaner internal analysis and reproducible follow-up experiments.
-
-The full cleaned 5-subject LOSO evaluation and the narrower sub3-style audit should be treated as separate analysis scopes.
+    docs/experiment_reports/

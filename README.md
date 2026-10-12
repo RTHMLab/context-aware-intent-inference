@@ -8,13 +8,28 @@ This codebase supports the experiments reported in:
 
 ## Publication
 
-This work has been accepted to the **2026 IEEE International Conference on Robot and Human Interactive Communication (RO-MAN)**.
+This work was published in the **2026 IEEE 35th International Conference on Robot and Human Interactive Communication (RO-MAN)**, held in Kitakyushu, Japan.
 
-Full proceedings citation, page numbers, and DOI will be added when available.
+**Paper:** [View on IEEE Xplore](https://ieeexplore.ieee.org/document/11714543)
 
-Preliminary citation:
+**DOI:** [10.1109/RO-MAN72286.2026.11714543](https://doi.org/10.1109/RO-MAN72286.2026.11714543)
 
-> P. Timilsina and T. Higgins, “Bayesian Belief Fusion for Intent Inference via Egocentric Vision and Gesture Recognition,” accepted to the 2026 IEEE International Conference on Robot and Human Interactive Communication (RO-MAN), 2026.
+### Citation
+
+P. Timilsina and T. Higgins, "Bayesian Belief Fusion for Intent Inference via Egocentric Vision and Gesture Recognition," *2026 IEEE 35th International Conference on Robot and Human Interactive Communication (RO-MAN)*, Kitakyushu, Japan, 2026, pp. 372–378, doi: 10.1109/RO-MAN72286.2026.11714543.
+
+### BibTeX
+
+```bibtex
+@INPROCEEDINGS{11714543,
+  author={Timilsina, Prabin and Higgins, Taylor},
+  booktitle={2026 IEEE 35th International Conference on Robot and Human Interactive Communication (RO-MAN)},
+  title={Bayesian Belief Fusion for Intent Inference via Egocentric Vision and Gesture Recognition},
+  year={2026},
+  pages={372-378},
+  doi={10.1109/RO-MAN72286.2026.11714543}
+}
+```
 
 ## Maintainer
 
